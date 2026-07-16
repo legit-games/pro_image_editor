@@ -121,6 +121,16 @@ class _RoundedBackgroundTextFieldState
     final fontSize =
         (widget.style.fontSize ?? defaultTextStyle.style.fontSize ?? 16);
 
+    // The background rectangle drawn by [RoundedBackgroundTextPainter] always
+    // extends the text by these paddings (see `paddingHorizontal`/
+    // `paddingVertical` there). The finished layer reserves room for them via
+    // `enableHitBoxCorrection: true`; this editing preview must reserve the
+    // same room so the box is symmetric while typing and does not visibly
+    // grow/shift the moment editing completes.
+    final lineHeight = _preferredLineHeight(fontSize);
+    final hitBoxHorizontal = lineHeight * 0.3;
+    final hitBoxVertical = lineHeight * 0.1;
+
     return Stack(
       clipBehavior: Clip.none,
       alignment: switch (widget.textAlign) {
@@ -132,9 +142,29 @@ class _RoundedBackgroundTextFieldState
       },
       children: [
         if (_textController.text.isNotEmpty) _buildBackgroundText(),
-        _buildEditableText(fontSize: fontSize),
+        _buildEditableText(
+          fontSize: fontSize,
+          hitBoxHorizontal: hitBoxHorizontal,
+          hitBoxVertical: hitBoxVertical,
+        ),
       ],
     );
+  }
+
+  /// The preferred line height for [widget.style] at [fontSize], computed the
+  /// same way [RoundedBackgroundText] does, so the hit-box padding reserved
+  /// here matches the rectangle the painter draws exactly.
+  double _preferredLineHeight(double fontSize) {
+    final painter = TextPainter(
+      text: TextSpan(
+        style: const TextStyle(
+          leadingDistribution: TextLeadingDistribution.proportional,
+        ).merge(widget.style.copyWith(fontSize: fontSize)),
+        text: 'A',
+      ),
+      textDirection: Directionality.maybeOf(context) ?? TextDirection.ltr,
+    )..layout();
+    return painter.preferredLineHeight;
   }
 
   Widget _buildBackgroundText() {
@@ -158,59 +188,77 @@ class _RoundedBackgroundTextFieldState
           cursorWidth: widget.cursorWidth,
           textAlign: widget.textAlign,
           backgroundColor: widget.backgroundColor,
+          // Match the finished layer (LayerWidgetTextItem) so the rounded
+          // background reserves symmetric padding while editing.
+          enableHitBoxCorrection: true,
         ),
       ),
     );
   }
 
-  Widget _buildEditableText({required double fontSize}) {
-    return Material(
-      type: MaterialType.transparency,
-      child: TextField(
-        onTap: _textController.text.isEmpty &&
-                View.of(context).viewInsets.bottom <= 0
-            ? () {
-                FocusManager.instance.primaryFocus?.unfocus();
-                widget.focusNode.requestFocus();
-              }
-            : null,
-        autofocus: widget.autofocus,
-        controller: _textController,
-        focusNode: widget.focusNode,
-        scrollPhysics: const NeverScrollableScrollPhysics(),
-        scrollController: _scrollCtrl,
-        scrollPadding: EdgeInsets.zero,
-        style: widget.style.copyWith(
-          fontSize: fontSize,
-          leadingDistribution: TextLeadingDistribution.proportional,
-          height: widget.configs.style.textHeight,
+  Widget _buildEditableText({
+    required double fontSize,
+    required double hitBoxHorizontal,
+    required double hitBoxVertical,
+  }) {
+    return Padding(
+      // Inset the editable glyphs by the same hit-box padding the background
+      // rectangle reserves, so the visible text stays centered inside the box
+      // and aligns with the finished layer.
+      padding: EdgeInsets.symmetric(
+        horizontal: hitBoxHorizontal,
+        vertical: hitBoxVertical,
+      ),
+      child: Material(
+        type: MaterialType.transparency,
+        child: TextField(
+          onTap:
+              _textController.text.isEmpty &&
+                  View.of(context).viewInsets.bottom <= 0
+              ? () {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  widget.focusNode.requestFocus();
+                }
+              : null,
+          autofocus: widget.autofocus,
+          controller: _textController,
+          focusNode: widget.focusNode,
+          scrollPhysics: const NeverScrollableScrollPhysics(),
+          scrollController: _scrollCtrl,
+          scrollPadding: EdgeInsets.zero,
+          style: widget.style.copyWith(
+            fontSize: fontSize,
+            leadingDistribution: TextLeadingDistribution.proportional,
+            height: widget.configs.style.textHeight,
+          ),
+          decoration: InputDecoration.collapsed(
+            hintText: _textController.text.isEmpty ? widget.hint : '',
+            hintStyle:
+                (widget.hintStyle ??
+                        TextStyle(color: Theme.of(context).hintColor))
+                    .copyWith(fontSize: fontSize),
+            maintainHintSize: false,
+          ),
+          textAlign: widget.textAlign,
+          maxLines: null,
+          keyboardType: TextInputType.multiline,
+          textCapitalization: TextCapitalization.sentences,
+          textInputAction: TextInputAction.newline,
+          cursorColor: widget.configs.style.inputCursorColor,
+          cursorWidth: widget.cursorWidth,
+          cursorHeight: widget.cursorHeight,
+          cursorRadius: widget.cursorRadius,
+          enableInteractiveSelection: true,
+          showCursor: true,
+          autocorrect: widget.configs.enableAutocorrect,
+          smartDashesType: SmartDashesType.enabled,
+          smartQuotesType: SmartQuotesType.enabled,
+          enableSuggestions: widget.configs.enableSuggestions,
+          clipBehavior: Clip.hardEdge,
+          onChanged: widget.onChanged,
+          onEditingComplete: widget.onEditingComplete,
+          onSubmitted: widget.onSubmitted,
         ),
-        decoration: InputDecoration.collapsed(
-          hintText: _textController.text.isEmpty ? widget.hint : '',
-          hintStyle: (widget.hintStyle ??
-                  TextStyle(color: Theme.of(context).hintColor))
-              .copyWith(fontSize: fontSize),
-          maintainHintSize: false,
-        ),
-        textAlign: widget.textAlign,
-        maxLines: null,
-        keyboardType: TextInputType.multiline,
-        textCapitalization: TextCapitalization.sentences,
-        textInputAction: TextInputAction.newline,
-        cursorColor: widget.configs.style.inputCursorColor,
-        cursorWidth: widget.cursorWidth,
-        cursorHeight: widget.cursorHeight,
-        cursorRadius: widget.cursorRadius,
-        enableInteractiveSelection: true,
-        showCursor: true,
-        autocorrect: widget.configs.enableAutocorrect,
-        smartDashesType: SmartDashesType.enabled,
-        smartQuotesType: SmartQuotesType.enabled,
-        enableSuggestions: widget.configs.enableSuggestions,
-        clipBehavior: Clip.hardEdge,
-        onChanged: widget.onChanged,
-        onEditingComplete: widget.onEditingComplete,
-        onSubmitted: widget.onSubmitted,
       ),
     );
   }
@@ -226,21 +274,51 @@ class _RoundedBackgroundTextFieldState
       ..add(ColorProperty('backgroundColor', widget.backgroundColor))
       ..add(DoubleProperty('maxTextWidth', widget.maxTextWidth))
       ..add(DoubleProperty('cursorWidth', widget.cursorWidth))
-      ..add(DoubleProperty('cursorHeight', widget.cursorHeight,
-          defaultValue: null))
-      ..add(DiagnosticsProperty<Radius>('cursorRadius', widget.cursorRadius,
-          defaultValue: null))
+      ..add(
+        DoubleProperty('cursorHeight', widget.cursorHeight, defaultValue: null),
+      )
+      ..add(
+        DiagnosticsProperty<Radius>(
+          'cursorRadius',
+          widget.cursorRadius,
+          defaultValue: null,
+        ),
+      )
       ..add(StringProperty('hint', widget.hint))
-      ..add(DiagnosticsProperty<TextStyle>('hintStyle', widget.hintStyle,
-          defaultValue: null))
-      ..add(FlagProperty('autofocus',
-          value: widget.autofocus, ifTrue: 'autofocus enabled'))
-      ..add(FlagProperty('hasOnChanged',
-          value: widget.onChanged != null, ifTrue: 'onChanged set'))
-      ..add(FlagProperty('hasOnEditingComplete',
+      ..add(
+        DiagnosticsProperty<TextStyle>(
+          'hintStyle',
+          widget.hintStyle,
+          defaultValue: null,
+        ),
+      )
+      ..add(
+        FlagProperty(
+          'autofocus',
+          value: widget.autofocus,
+          ifTrue: 'autofocus enabled',
+        ),
+      )
+      ..add(
+        FlagProperty(
+          'hasOnChanged',
+          value: widget.onChanged != null,
+          ifTrue: 'onChanged set',
+        ),
+      )
+      ..add(
+        FlagProperty(
+          'hasOnEditingComplete',
           value: widget.onEditingComplete != null,
-          ifTrue: 'onEditingComplete set'))
-      ..add(FlagProperty('hasOnSubmitted',
-          value: widget.onSubmitted != null, ifTrue: 'onSubmitted set'));
+          ifTrue: 'onEditingComplete set',
+        ),
+      )
+      ..add(
+        FlagProperty(
+          'hasOnSubmitted',
+          value: widget.onSubmitted != null,
+          ifTrue: 'onSubmitted set',
+        ),
+      );
   }
 }
